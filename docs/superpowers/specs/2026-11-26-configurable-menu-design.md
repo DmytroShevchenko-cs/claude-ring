@@ -24,7 +24,10 @@ File: `~/.config/claude-ring/config.json` (JSON; comments and trailing commas al
     "host": "gitlab",                         // gitlab | github
     "baseUrl": "https://gitlab.com",          // self-hosted allowed; default per host
     "group": "acme",                          // gitlab group or github org; optional
-    "targets": ["develop", "main"]            // target branches for the reviews submenu
+    "targets": [                              // items of the reviews submenu
+      "develop",                              // one branch
+      { "label": "prod", "branches": ["master", "main"] }  // one item for several branch names
+    ]
   },
   "tracker": {
     "type": "jira",                           // jira | linear | youtrack | github | none
@@ -58,13 +61,15 @@ Legacy fields from the current schema (`gitLabBaseUrl`, `gitLabGroup`, `jiraBase
 |---|---|---|
 | `chat` | always | focus the chat where it came from (today: VS Code window + `vscode://anthropic.claude-code/open?session=`) |
 | `ide` | `ide` configured and chat has repos | submenu: one slot per repo (open that repo), "All" (open all), back |
-| `reviews` | task key present | submenu titled "MR" (gitlab) or "PR" (github): "All", one item per `git.targets`, back |
+| `reviews` | task key present | submenu titled "MR" (gitlab) or "PR" (github): "All", one item per `git.targets` entry (see review targets below), back |
 | `issue` | task key present and tracker ≠ none and its required fields set | open the issue |
 | `repos` | chat has repos | submenu: one slot per repo (open its branch page), "All in browser", "Folder in Finder", back |
 
 Links per host:
 - GitLab: branch `{webUrl}/-/tree/{branch}`; reviews `{baseUrl}/groups/{group}/-/merge_requests?scope=all&state=all&search={key}[&target_branch={t}]`, without group `{baseUrl}/dashboard/merge_requests?...`.
 - GitHub: branch `{webUrl}/tree/{branch}`; reviews `https://github.com/pulls?q=is:pr+{key}[+base:{t}]` (+ `org:{group}` when set; `baseUrl` replaces `https://github.com` for GitHub Enterprise).
+
+Review targets: a string target is one branch, its label is the branch name. An object target `{ "label", "branches" }` is one menu item for several branch names (repos of one task may use `master` or `main` for production). On click it opens the reviews URL for each of its branches that exists as `origin/<branch>` in at least one of the chat's repos (checked locally: `refs/remotes/origin/<branch>` or `packed-refs` in the repo's common git dir, no network); if none matches or the chat has no repos, it opens all its branches. One URL → `OpenUrl`, several → `OpenUrls`. Legacy `mrTargets[].branch` become string targets.
 
 Task key extraction: if `taskKeyPattern` has a capture group, the key is the first group; otherwise the whole match.
 
