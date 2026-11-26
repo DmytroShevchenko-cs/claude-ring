@@ -50,7 +50,8 @@ src/ClaudeRing.Core/
   Strings.cs           NEW  T5  en/ru slot labels, language choice
   SystemLanguage.cs    NEW  T5  first macOS UI language via `defaults read -g AppleLanguages`
   MenuPage.cs          NEW  T6  MenuItem, MenuPage (page model for RingMenu)
-  MenuBuilder.cs       NEW  T7  chat page + submenus from Settings
+  MenuBuilder.cs       NEW  T7  chat page + submenus from Settings; T12 review target groups
+  RepoFinder.cs        MOD  T12 HasRemoteBranch (local refs only)
   RingMenu.cs          MOD  T4 (MenuAction), T6 (page stack), T7 (helpers moved), T8 (uses MenuBuilder)
   Launcher.cs          MOD  T4 (OpenIde, Run), T8 (no RingConfig, no OpenInRider)
   ChatSource.cs        MOD  T8 (Settings), T9 (TaskKey instance)
@@ -69,7 +70,7 @@ ClaudeRingPlugin/src/
 README.md, config.example.json   MOD  T11
 ```
 
-Task order and dependencies: T1 → T2 (validates templates) → T3 → T4 → T5 → T6 → T7 (uses T1-T6) → T8 (switch) → T9 → T10 → T11.
+Task order and dependencies: T1 → T2 (validates templates) → T3 → T4 → T5 → T6 → T7 (uses T1-T6) → T8 (switch) → T9 → T10 → T12 (review target groups) → T11.
 
 ---
 
@@ -3532,6 +3533,300 @@ git commit -m "Reload the config when the file changes and keep the old one on e
 
 ---
 
+### Task 12: Review targets with several branch names
+
+Run this task after Task 10 and before Task 11.
+
+Repos of one task can use different names for the same role, e.g. production is `master` in some repos and `main` in others. A GitLab/GitHub review search filters by one target branch, so one menu item must be able to open the search for several branch names, but without empty tabs for names no repo has.
+
+**Files:**
+- Modify: `src/ClaudeRing.Core/Settings.cs` (`ReviewTarget`, `GitSettings.Targets` type)
+- Modify: `src/ClaudeRing.Core/SettingsLoader.cs` (parse targets; legacy `mrTargets`)
+- Modify: `src/ClaudeRing.Core/RepoFinder.cs` (`HasRemoteBranch`, shared common git dir helper)
+- Modify: `src/ClaudeRing.Core/MenuBuilder.cs` (reviews submenu, branch check injection)
+- Test: `tests/ClaudeRing.Core.Tests/SettingsLoaderTests.cs`, `tests/ClaudeRing.Core.Tests/RepoFinderTests.cs`, `tests/ClaudeRing.Core.Tests/MenuBuilderTests.cs`, `tests/ClaudeRing.Core.Tests/RingMenuTests.cs` (only the `GitSettings(...)` constructions)
+
+**Interfaces:**
+- Consumes: `GitSettings`, `SettingsLoader` helpers `Get`, `TextList`, `Errors` (Task 2); `IGitHost.ReviewsUrl(string key, string? target)` (Task 3); `MenuAction.OpenUrl`, `MenuAction.OpenUrls` (existing); `Strings.Target(string)` (Task 5); `MenuBuilder` (Task 7).
+- Produces:
+  - `public sealed record ReviewTarget(string Label, IReadOnlyList<string> Branches)` with `public static ReviewTarget Branch(string name) => new(name, [name]);`
+  - `GitSettings(GitHostType Host, string BaseUrl, string? Group, IReadOnlyList<ReviewTarget> Targets)`; default targets `[ReviewTarget.Branch("main")]`.
+  - `public static bool RepoFinder.HasRemoteBranch(string repoPath, string branch)` — never throws.
+  - `public MenuBuilder(Settings settings, Strings strings, Func<RepoRef, string, bool>? hasRemoteBranch = null)`; default `(r, b) => RepoFinder.HasRemoteBranch(r.Path, b)`.
+
+Rules:
+- Config: each `git.targets` entry is a non-empty string (one branch, label = branch name) or an object `{ "label": "<non-empty string>", "branches": ["<non-empty string>", ...] }` with at least one branch. Errors (config not applied, like any other error): `git.targets: expected a list`; `git.targets[i]: expected a branch name or an object with label and branches`; `git.targets[i].label: expected a non-empty string`; `git.targets[i].branches: expected a non-empty list of branch names` (also for an empty list); item errors inside `branches` keep the `TextList` format `git.targets[i].branches[j]: expected a non-empty string`.
+- Legacy `mrTargets[].branch` become `ReviewTarget.Branch(branch)` (labels still ignored).
+- Menu label: `Strings.Target(target.Label)` (e.g. `→ prod`).
+- Click: a one-branch target → `OpenUrl(ReviewsUrl(key, branch))` with no branch check (today's behaviour). A target with several branches → keep the branches for which `hasRemoteBranch(repo, branch)` is true for at least one of the chat's repos; if none is kept (or the chat has no repos) keep all. One kept branch → `OpenUrl`, several → `OpenUrls` in the order of `Branches`.
+- `HasRemoteBranch`: in the repo's common git dir (`.git` directory; for a `.git` file: the `gitdir`, then its `commondir` if present — the same rules `ReadWebUrl` uses), true when the file `refs/remotes/origin/<branch>` exists, or `packed-refs` has a line whose second space-separated field equals `refs/remotes/origin/<branch>`. Any IO error → false. No network, no `git` process.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `tests/ClaudeRing.Core.Tests/SettingsLoaderTests.cs`:
+- change the four target assertions to compare labels and branches, e.g. `Assert.Equal(["main"], s.Git.Targets.Select(t => t.Label).ToArray());` (and the same for `["develop", "main"]`, `["Dev", "RC"]`, `["new"]`);
+- add:
+
+```csharp
+    [Fact]
+    public void Target_can_group_several_branch_names()
+    {
+        var s = SettingsLoader.Parse("""
+            { "git": { "targets": [ "develop", { "label": "prod", "branches": ["master", "main"] } ] } }
+            """).Settings!;
+        Assert.Equal(["develop", "prod"], s.Git.Targets.Select(t => t.Label).ToArray());
+        Assert.Equal(["develop"], s.Git.Targets[0].Branches.ToArray());
+        Assert.Equal(["master", "main"], s.Git.Targets[1].Branches.ToArray());
+    }
+```
+
+- add these rows to `Invalid_value_is_an_error_with_its_field_path`:
+
+```csharp
+    [InlineData("""{ "git": { "targets": [ { "branches": ["main"] } ] } }""", "git.targets[0].label:")]
+    [InlineData("""{ "git": { "targets": [ { "label": "prod", "branches": [] } ] } }""", "git.targets[0].branches:")]
+    [InlineData("""{ "git": { "targets": [ { "label": "prod" } ] } }""", "git.targets[0].branches:")]
+    [InlineData("""{ "git": { "targets": "main" } }""", "git.targets:")]
+```
+
+In `tests/ClaudeRing.Core.Tests/RepoFinderTests.cs` add:
+
+```csharp
+    [Fact]
+    public void Remote_branch_from_loose_ref_packed_refs_and_worktree()
+    {
+        using var dir = new TempDir();
+        dir.Write("a/.git/HEAD", "ref: refs/heads/x\n");
+        dir.Write("a/.git/refs/remotes/origin/master", "0000000000000000000000000000000000000000\n");
+        dir.Write("b/.git/HEAD", "ref: refs/heads/x\n");
+        dir.Write("b/.git/packed-refs", "# pack-refs with: peeled fully-peeled sorted\n1111111111111111111111111111111111111111 refs/remotes/origin/main\n");
+        dir.Write("main/.git/worktrees/wt/HEAD", "ref: refs/heads/x\n");
+        dir.Write("main/.git/worktrees/wt/commondir", "../..\n");
+        dir.Write("main/.git/refs/remotes/origin/main", "2222222222222222222222222222222222222222\n");
+        dir.Write("wt/.git", $"gitdir: {Path.Combine(dir.Path, "main/.git/worktrees/wt")}\n");
+
+        Assert.True(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "a"), "master"));
+        Assert.False(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "a"), "main"));
+        Assert.True(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "b"), "main"));
+        Assert.False(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "b"), "master"));
+        Assert.True(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "wt"), "main"));
+        Assert.False(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "missing"), "main"));
+    }
+```
+
+In `tests/ClaudeRing.Core.Tests/MenuBuilderTests.cs` and `tests/ClaudeRing.Core.Tests/RingMenuTests.cs`, change each `new GitSettings(..., [<names>])` to wrap names: `["develop", "main"]` → `[ReviewTarget.Branch("develop"), ReviewTarget.Branch("main")]` (same for `["main"]` and `["Dev", "RC", "master"]`). Then add to `MenuBuilderTests`:
+
+```csharp
+    private static readonly GitSettings ProdGroup = new(
+        GitHostType.GitLab, "https://gitlab.example.com", "acme",
+        [ReviewTarget.Branch("develop"), new ReviewTarget("prod", ["master", "main"])]);
+
+    private static MenuPage Reviews(Func<RepoRef, string, bool> hasRemoteBranch, int repos = 2) =>
+        new MenuBuilder(Config() with { Git = ProdGroup }, Strings.En, hasRemoteBranch)
+            .ChatPage(Chat(repos: repos)).Items.Single(i => i.Label == "MR").Submenu!;
+
+    private static string Mrs(string target) =>
+        $"https://gitlab.example.com/groups/acme/-/merge_requests?scope=all&state=all&search=A-1&target_branch={target}";
+
+    [Fact]
+    public void Group_target_opens_only_branches_that_exist()
+    {
+        var reviews = Reviews((r, b) => b == "main");
+        Assert.Equal(["All MRs", "→ develop", "→ prod"], Labels(reviews));
+        Assert.Equal(new MenuAction.OpenUrl(Mrs("main")), reviews.Items[2].Action);
+    }
+
+    [Fact]
+    public void Group_target_opens_every_existing_branch_in_order()
+    {
+        var reviews = Reviews((r, b) => r.Name.StartsWith("repo0") ? b == "main" : b == "master");
+        Assert.Equal(new MenuAction.OpenUrls([Mrs("master"), Mrs("main")]), reviews.Items[2].Action, new ActionComparer());
+    }
+
+    [Fact]
+    public void Group_target_opens_all_branches_when_none_is_found()
+    {
+        Assert.Equal(new MenuAction.OpenUrls([Mrs("master"), Mrs("main")]), Reviews((r, b) => false).Items[2].Action, new ActionComparer());
+        Assert.Equal(new MenuAction.OpenUrls([Mrs("master"), Mrs("main")]), Reviews((r, b) => true, repos: 0).Items[2].Action, new ActionComparer());
+    }
+
+    [Fact]
+    public void One_branch_target_does_not_check_branches()
+    {
+        var reviews = Reviews((r, b) => throw new InvalidOperationException("must not be called"));
+        Assert.Equal(new MenuAction.OpenUrl(Mrs("develop")), reviews.Items[1].Action);
+    }
+```
+
+`OpenUrls` holds a list, so record equality compares list references. If the test project already has a comparer for actions with lists, use it; otherwise add this private class to `MenuBuilderTests`:
+
+```csharp
+    private sealed class ActionComparer : IEqualityComparer<MenuAction?>
+    {
+        public bool Equals(MenuAction? x, MenuAction? y) => (x, y) switch
+        {
+            (MenuAction.OpenUrls a, MenuAction.OpenUrls b) => a.Urls.SequenceEqual(b.Urls),
+            _ => Object.Equals(x, y),
+        };
+
+        public int GetHashCode(MenuAction? obj) => 0;
+    }
+```
+
+Note: with `repos: 0` the chat has no repos, so the `MR` item is still shown (it needs only the task key) and the check is skipped. If `Chat(repos: 0)` in this file builds a chat without a task key, build the chat inline with `TaskKey = "A-1"` and an empty repo list instead.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `dotnet test tests/ClaudeRing.Core.Tests`
+Expected: build errors (`ReviewTarget`, `HasRemoteBranch` and the 3-argument `MenuBuilder` constructor do not exist).
+
+- [ ] **Step 3: Implement**
+
+`src/ClaudeRing.Core/Settings.cs`:
+
+```csharp
+// One item of the reviews submenu. Several branch names cover repos that name the same branch differently (master / main).
+public sealed record ReviewTarget(string Label, IReadOnlyList<string> Branches)
+{
+    public static ReviewTarget Branch(string name) => new(name, [name]);
+}
+
+public sealed record GitSettings(GitHostType Host, string BaseUrl, string? Group, IReadOnlyList<ReviewTarget> Targets);
+```
+
+Update the `Settings` default for `Git` to `[ReviewTarget.Branch("main")]`.
+
+`src/ClaudeRing.Core/SettingsLoader.cs` — in `Git(...)`:
+
+```csharp
+            List<ReviewTarget> targets = Targets(git) ?? LegacyTargets(root) ?? [ReviewTarget.Branch("main")];
+```
+
+`LegacyTargets` returns `List<ReviewTarget>?` and adds `ReviewTarget.Branch(branch)`. New method next to it:
+
+```csharp
+        private List<ReviewTarget>? Targets(JsonElement? git)
+        {
+            if (Get(git, "targets") is not { } value) return null;
+            if (value.ValueKind != JsonValueKind.Array)
+            {
+                Errors.Add("git.targets: expected a list");
+                return null;
+            }
+            var result = new List<ReviewTarget>();
+            var i = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                var path = $"git.targets[{i++}]";
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } name)
+                {
+                    result.Add(ReviewTarget.Branch(name));
+                    continue;
+                }
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    Errors.Add($"{path}: expected a branch name or an object with label and branches");
+                    continue;
+                }
+                var label = Get(item, "label") is { ValueKind: JsonValueKind.String } l ? l.GetString() : null;
+                if (string.IsNullOrEmpty(label)) Errors.Add($"{path}.label: expected a non-empty string");
+                var errorsBefore = Errors.Count;
+                var branches = TextList(item, "branches", $"{path}.branches");
+                if (Errors.Count == errorsBefore && (branches == null || branches.Count == 0))
+                    Errors.Add($"{path}.branches: expected a non-empty list of branch names");
+                if (!string.IsNullOrEmpty(label) && branches is { Count: > 0 }) result.Add(new ReviewTarget(label, branches));
+            }
+            return result;
+        }
+```
+
+`src/ClaudeRing.Core/RepoFinder.cs` — move the common-dir part of `ReadWebUrl` into a helper and use it in both places (no behaviour change for `ReadWebUrl`):
+
+```csharp
+    // Folder with config, refs and packed-refs. For a worktree it is the main repo's .git folder.
+    private static string? CommonGitDir(string repo)
+    {
+        var git = Path.Combine(repo, ".git");
+        if (Directory.Exists(git)) return git;
+        if (!File.Exists(git)) return null;
+        var gitDir = ParseGitDir(git, repo);
+        if (gitDir == null) return null;
+        var commonFile = Path.Combine(gitDir, "commondir");
+        return File.Exists(commonFile)
+            ? Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(commonFile).Trim()))
+            : gitDir;
+    }
+
+    // True when the repo knows the branch on origin (from the last fetch). Reads files only.
+    public static bool HasRemoteBranch(string repoPath, string branch)
+    {
+        try
+        {
+            if (CommonGitDir(repoPath) is not { } dir) return false;
+            var name = "refs/remotes/origin/" + branch;
+            if (File.Exists(Path.Combine(dir, name))) return true;
+            var packed = Path.Combine(dir, "packed-refs");
+            return File.Exists(packed)
+                && File.ReadLines(packed).Any(line => line.Split(' ') is [_, var refName] && refName == name);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+```
+
+`ReadWebUrl` becomes: `CommonGitDir(repo)` → `config` file in it → `ToWebUrl(OriginUrl(...))`, inside the same try/catch.
+
+`src/ClaudeRing.Core/MenuBuilder.cs`:
+
+```csharp
+    private readonly Func<RepoRef, string, bool> _hasRemoteBranch;
+
+    public MenuBuilder(Settings settings, Strings strings, Func<RepoRef, string, bool>? hasRemoteBranch = null)
+    {
+        // ... existing lines ...
+        _hasRemoteBranch = hasRemoteBranch ?? ((r, b) => RepoFinder.HasRemoteBranch(r.Path, b));
+    }
+```
+
+In `ReviewsItem` replace the `AddRange` line:
+
+```csharp
+        items.AddRange(_settings.Git.Targets.Select(t => new MenuItem(Strings.Target(t.Label), TargetAction(key, t, c.Repos))));
+```
+
+and add:
+
+```csharp
+    // Several branch names: open only the ones some repo has on origin; if none is found, open all of them.
+    private MenuAction TargetAction(string key, ReviewTarget target, IReadOnlyList<RepoRef> repos)
+    {
+        var branches = target.Branches;
+        if (branches.Count > 1)
+        {
+            var found = branches.Where(b => repos.Any(r => _hasRemoteBranch(r, b))).ToList();
+            if (found.Count > 0) branches = found;
+        }
+        return branches.Count == 1
+            ? new MenuAction.OpenUrl(_git.ReviewsUrl(key, branches[0]))
+            : new MenuAction.OpenUrls(branches.Select(b => _git.ReviewsUrl(key, b)).ToList());
+    }
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `dotnet test tests/ClaudeRing.Core.Tests` → `Failed:     0`.
+Run the plugin compile check (no reload): `dotnet msbuild -restore -t:Compile ClaudeRingPlugin/src/ClaudeRingPlugin.csproj -v:q -nologo -clp:ErrorsOnly` → no `error` lines.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/ClaudeRing.Core/Settings.cs src/ClaudeRing.Core/SettingsLoader.cs src/ClaudeRing.Core/RepoFinder.cs src/ClaudeRing.Core/MenuBuilder.cs tests/ClaudeRing.Core.Tests/SettingsLoaderTests.cs tests/ClaudeRing.Core.Tests/RepoFinderTests.cs tests/ClaudeRing.Core.Tests/MenuBuilderTests.cs tests/ClaudeRing.Core.Tests/RingMenuTests.cs
+git commit -m "Review targets with several branch names"
+```
+
+
 ### Task 11: Docs, example config, owner config and manual check
 
 **Files:**
@@ -3593,7 +3888,7 @@ Replace the whole content of `config.example.json`:
     "host": "gitlab",
     "baseUrl": "https://gitlab.example.com",
     "group": "acme",
-    "targets": ["develop", "main"]
+    "targets": ["develop", { "label": "prod", "branches": ["master", "main"] }]
   },
   "tracker": {
     "type": "jira",
@@ -3697,7 +3992,10 @@ with its field path (for example `git.host: unknown value "bitbucket"`) to the p
     "host": "gitlab",                         // gitlab | github
     "baseUrl": "https://gitlab.com",          // self-hosted GitLab or GitHub Enterprise
     "group": "acme",                          // GitLab group or GitHub organization
-    "targets": ["develop", "main"]            // target branches in the MR/PR submenu
+    "targets": [                              // items of the MR/PR submenu
+      "develop",                              // one target branch
+      { "label": "prod", "branches": ["master", "main"] }  // one item for repos that use master or main
+    ]
   },
   "tracker": {
     "type": "jira",                           // jira | linear | youtrack | github | none
@@ -3728,7 +4026,7 @@ with its field path (for example `git.host: unknown value "bitbucket"`) to the p
 | `git.host` | `gitlab` | `gitlab` or `github` |
 | `git.baseUrl` | `https://gitlab.com` or `https://github.com` | Address of a self-hosted GitLab or GitHub Enterprise |
 | `git.group` | none | GitLab group or GitHub organization for the MR/PR search. Without it GitLab uses your MR dashboard and GitHub searches everywhere |
-| `git.targets` | `["main"]` | Target branches shown in the MR/PR submenu as `→ <branch>` |
+| `git.targets` | `["main"]` | Items of the MR/PR submenu, shown as `→ <label>`. A string is one target branch. `{ "label": "prod", "branches": ["master", "main"] }` is one item for several branch names: it opens the search for each of them that exists on `origin` in the chat's repositories (all of them when none is found) |
 | `tracker.type` | `none` | `jira`, `linear`, `youtrack`, `github` or `none` |
 | `tracker.baseUrl` | none | Jira or YouTrack address |
 | `tracker.workspace` | none | Linear workspace |
@@ -3745,7 +4043,7 @@ with its field path (for example `git.host: unknown value "bitbucket"`) to the p
 |---|---|---|
 | `chat` | always | Opens the chat in VS Code |
 | `ide` | `ide.type` is set and the chat has repositories | Submenu: one slot per repository, then "All" |
-| `reviews` | the chat has a task key | Submenu "MR" (GitLab) or "PR" (GitHub): all of them, then one per `git.targets` branch |
+| `reviews` | the chat has a task key | Submenu "MR" (GitLab) or "PR" (GitHub): all of them, then one per `git.targets` entry |
 | `issue` | the chat has a task key and the tracker can build a link | Opens the issue |
 | `repos` | the chat has repositories | Submenu: one slot per repository (branch page in the browser), "All in browser", "Folder in Finder" |
 
@@ -3849,7 +4147,7 @@ cp "$cfg" "$cfg.legacy.bak"
 jq '{
   language: "ru",
   repoRoots: .repoRoots,
-  git: { host: "gitlab", baseUrl: .gitLabBaseUrl, group: .gitLabGroup, targets: [.mrTargets[].branch] },
+  git: { host: "gitlab", baseUrl: .gitLabBaseUrl, group: .gitLabGroup, targets: [.mrTargets[].branch | if . == "master" then {label: "master", branches: ["master", "main"]} else . end] },
   tracker: { type: "jira", baseUrl: .jiraBaseUrl },
   ide: { type: "rider" },
   slotCount: .slotCount,
@@ -3858,7 +4156,7 @@ jq '{
 cat "$cfg"
 ```
 
-Expected: a JSON object with exactly the keys `language`, `repoRoots`, `git` (`host`, `baseUrl`, `group`, `targets` with three branches), `tracker` (`type`, `baseUrl`), `ide` (`type`), `slotCount` 9, `reopenDelayMs` 150; no `null` values. The controller compares the values with the ones in its brief. Do not `git add` anything from `~/.config`.
+Expected: a JSON object with exactly the keys `language`, `repoRoots`, `git` (`host`, `baseUrl`, `group`, `targets` with three entries: two branch names and `{ "label": "master", "branches": ["master", "main"] }`), `tracker` (`type`, `baseUrl`), `ide` (`type`), `slotCount` 9, `reopenDelayMs` 150; no `null` values. The controller compares the values with the ones in its brief. Do not `git add` anything from `~/.config`.
 
 - [ ] **Step 8: Manual check (ask the owner before this step: building the plugin reloads the live plugin)**
 
