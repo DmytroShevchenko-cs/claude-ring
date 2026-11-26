@@ -35,4 +35,20 @@ public class LauncherTests
         Launcher().OpenUrls([]);
         Assert.Empty(_runner.Started);
     }
+
+    [Fact]
+    public void Open_ide_starts_every_command()
+    {
+        Launcher().OpenIde(new IdeSettings(IdeType.Cursor), [new RepoRef("a", "/p/a", "b"), new RepoRef("c", "/p/c", "b")]);
+        Assert.Equal(2, _runner.Started.Count);
+        Assert.Equal(["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "-n", "/p/a"], _runner.Started[0]);
+        Assert.Equal(["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "-n", "/p/c"], _runner.Started[1]);
+    }
+
+    [Fact]
+    public void Run_starts_the_program_with_arguments()
+    {
+        Launcher().Run("open", ["-a", "Terminal", "/p/a"]);
+        Assert.Equal(["open", "-a", "Terminal", "/p/a"], _runner.Started.Single());
+    }
 }

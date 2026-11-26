@@ -4,9 +4,12 @@ public abstract record MenuAction
 {
     public sealed record FocusChat(ChatTab Tab) : MenuAction;
     public sealed record OpenRider(IReadOnlyList<RepoRef> Repos) : MenuAction;
+    public sealed record OpenIde(IdeSettings Ide, IReadOnlyList<RepoRef> Repos) : MenuAction;
     public sealed record OpenUrl(string Url) : MenuAction;
     public sealed record OpenUrls(IReadOnlyList<string> Urls) : MenuAction;
     public sealed record Reveal(IReadOnlyList<string> Paths) : MenuAction;
+    // Starts a program directly, without a shell.
+    public sealed record Run(string File, IReadOnlyList<string> Args) : MenuAction;
 }
 
 public sealed record ClickResult(MenuAction? Action, bool Reopen);

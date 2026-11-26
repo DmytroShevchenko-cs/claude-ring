@@ -25,4 +25,12 @@ public sealed class Launcher(IProcessRunner runner, RingConfig config, Action<in
     }
 
     public void Reveal(IEnumerable<string> paths) => runner.Start("open", paths.ToArray());
+
+    public void OpenIde(IdeSettings ide, IReadOnlyList<RepoRef> repos)
+    {
+        foreach (var command in IdeLauncher.Commands(ide, repos.Select(r => r.Path).ToList())) Run(command.File, command.Args);
+    }
+
+    // Start errors go to the caller; their message names the program path.
+    public void Run(string file, IReadOnlyList<string> args) => runner.Start(file, [.. args]);
 }
