@@ -17,9 +17,14 @@ namespace Loupedeck.ClaudeRingPlugin
 
         internal static event Action SlotsChanged;
 
+        // Serializes config reloads with each other and with Unload.
+        private static readonly Object ReloadLock = new Object();
+
         private static ProcessRunner _runner;
 
         private static Launcher _launcher;
+
+        private static ConfigWatcher _configWatcher;
 
         public ClaudeRingPlugin()
         {
@@ -47,6 +52,10 @@ namespace Loupedeck.ClaudeRingPlugin
                 PluginLog.Info($"Открытых чатов: {labels.Count}: {String.Join(", ", labels)}");
 
                 RingWatcher.Start(settings.ResetOnRingEvent, onClosedByUser: Refresh);
+                lock (ReloadLock)
+                {
+                    _configWatcher = ConfigWatcher.Start(Settings.DefaultPath, ReloadSettings);
+                }
             }
             catch (Exception ex)
             {
@@ -56,6 +65,13 @@ namespace Loupedeck.ClaudeRingPlugin
 
         public override void Unload()
         {
+            lock (ReloadLock)
+            {
+                try { _configWatcher?.Dispose(); }
+                catch (Exception ex) { PluginLog.Error(ex, "Не удалось остановить слежение за конфигом"); }
+                _configWatcher = null;
+            }
+
             try { RingWatcher.Stop(); }
             catch (Exception ex) { PluginLog.Error(ex, "Не удалось отписаться от событий кольца"); }
 
@@ -69,10 +85,15 @@ namespace Loupedeck.ClaudeRingPlugin
         {
             try
             {
-                Menu.Reset();
-                if (Menu.LastLoadError != null)
+                var menu = Menu;
+                if (menu == null)
                 {
-                    PluginLog.Error(Menu.LastLoadError, "Не удалось прочитать открытые чаты");
+                    return;
+                }
+                menu.Reset();
+                if (menu.LastLoadError != null)
+                {
+                    PluginLog.Error(menu.LastLoadError, "Не удалось прочитать открытые чаты");
                 }
                 SlotsChanged?.Invoke();
             }
@@ -109,6 +130,49 @@ namespace Loupedeck.ClaudeRingPlugin
             MenuAction.OpenIde a => $"{IdeLauncher.DisplayName(a.Ide)}: {String.Join(" ", a.Repos.Select(r => r.Path))}",
             _ => action.ToString(),
         };
+
+        // Called by ConfigWatcher on a timer thread after the config file changes.
+        // A config with errors is not applied: the previous settings and menu stay.
+        private static void ReloadSettings()
+        {
+            try
+            {
+                lock (ReloadLock)
+                {
+                    if (_configWatcher == null)
+                    {
+                        return;
+                    }
+
+                    var settings = ReadSettings();
+                    if (settings == null)
+                    {
+                        PluginLog.Warning("Новый конфиг с ошибками, оставляю прежние настройки");
+                        return;
+                    }
+
+                    var previous = CurrentSettings;
+                    var menu = CreateMenu(settings);
+                    menu.Reset();
+                    if (menu.LastLoadError != null)
+                    {
+                        PluginLog.Error(menu.LastLoadError, "Не удалось прочитать открытые чаты");
+                    }
+                    CurrentSettings = settings;
+                    Menu = menu;
+                    if (previous?.ResetOnRingEvent != settings.ResetOnRingEvent)
+                    {
+                        RingWatcher.Start(settings.ResetOnRingEvent, onClosedByUser: Refresh);
+                    }
+                    PluginLog.Info("Конфиг перечитан");
+                }
+                SlotsChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Error(ex, "Не удалось перечитать конфиг");
+            }
+        }
 
         // Writes warnings and errors to the log. Null when the config has errors.
         private static Settings ReadSettings()
