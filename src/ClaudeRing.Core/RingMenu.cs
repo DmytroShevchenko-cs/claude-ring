@@ -3,7 +3,6 @@ namespace ClaudeRing.Core;
 public abstract record MenuAction
 {
     public sealed record FocusChat(ChatTab Tab) : MenuAction;
-    public sealed record OpenRider(IReadOnlyList<RepoRef> Repos) : MenuAction;
     public sealed record OpenIde(IdeSettings Ide, IReadOnlyList<RepoRef> Repos) : MenuAction;
     public sealed record OpenUrl(string Url) : MenuAction;
     public sealed record OpenUrls(IReadOnlyList<string> Urls) : MenuAction;
@@ -16,13 +15,10 @@ public sealed record ClickResult(MenuAction? Action, bool Reopen);
 
 public sealed record SlotView(string Label, bool Enabled);
 
-public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
+public sealed class RingMenu(IChatSource source, MenuBuilder builder)
 {
     // One ring slot: what it shows and what a click does.
     private sealed record Slot(string Label, Func<ClickResult> OnClick);
-
-    private const string Back = "← назад";
-    private const string More = "ещё ›";
 
     private readonly object _lock = new();
     // Pages opened from the root; the top one is shown. Empty means the root page.
@@ -30,7 +26,9 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
     private IReadOnlyList<ChatContext> _chats = [];
     private int _page;
 
-    private int N => config.SlotCount;
+    public int SlotCount => builder.SlotCount;
+
+    private int N => builder.SlotCount;
 
     // The plugin logs this after Reset. Null after a successful load.
     public Exception? LastLoadError { get; private set; }
@@ -92,11 +90,11 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
         var perPage = PerPage();
         var page = CurrentPage();
         var pageChats = _chats.Skip(page * perPage).Take(perPage)
-            .Select(c => (Slot?)new Slot(c.Label, () => Push(ChatPage(c)))).ToList();
+            .Select(c => (Slot?)new Slot(c.Label, () => Push(builder.ChatPage(c)))).ToList();
         if (_chats.Count > N)
         {
             while (pageChats.Count < N - 1) pageChats.Add(null);
-            pageChats.Add(new Slot(More, () => { _page = (CurrentPage() + 1) % PageCount(); return new ClickResult(null, true); }));
+            pageChats.Add(new Slot(builder.Strings.More, () => { _page = (CurrentPage() + 1) % PageCount(); return new ClickResult(null, true); }));
         }
         return pageChats;
     }
@@ -113,7 +111,7 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
     {
         var slots = page.Items.Take(N - 1).Select(i => (Slot?)new Slot(i.Label, () => Open(i))).ToList();
         while (slots.Count < N - 1) slots.Add(null);
-        slots.Add(new Slot(Back, Pop));
+        slots.Add(new Slot(builder.Strings.Back, Pop));
         return slots;
     }
 
@@ -137,41 +135,5 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
     {
         _pages.Clear();
         _page = 0;
-    }
-
-    private MenuPage ChatPage(ChatContext c)
-    {
-        var items = new List<MenuItem> { new("VS Code", new MenuAction.FocusChat(c.Tab)) };
-        if (c.TaskKey == null) return new MenuPage(items);
-        if (c.Repos.Count > 0) items.Add(new("Rider", Submenu: RiderPage(c)));
-        items.Add(new("MR", Submenu: MrPage(c)));
-        if (links.JiraIssue(c.TaskKey) is { } jira) items.Add(new("Jira", new MenuAction.OpenUrl(jira)));
-        if (c.Repos.Count > 0) items.Add(new("Репо", Submenu: RepoPage(c)));
-        return new MenuPage(items);
-    }
-
-    private MenuPage MrPage(ChatContext c)
-    {
-        var items = new List<MenuItem> { new("Все MR", new MenuAction.OpenUrl(links.GroupMrs(c.TaskKey!))) };
-        items.AddRange(config.MrTargets.Select(t => new MenuItem(t.Label, new MenuAction.OpenUrl(links.GroupMrs(c.TaskKey!, t.Branch)))));
-        return new MenuPage(items);
-    }
-
-    // One repo per slot, then "Все"; repos that do not fit are reachable only through "Все".
-    private MenuPage RiderPage(ChatContext c)
-    {
-        var items = c.Repos.Take(N - 2).Select(r => new MenuItem(MenuBuilder.DisplayName(r, c.TaskKey), new MenuAction.OpenRider([r]))).ToList();
-        items.Add(new("Все", new MenuAction.OpenRider(c.Repos)));
-        return new MenuPage(items);
-    }
-
-    private MenuPage RepoPage(ChatContext c)
-    {
-        var items = c.Repos.Take(N - 3).Select(r => new MenuItem(MenuBuilder.DisplayName(r, c.TaskKey),
-            links.RepoBranch(r) is { } url ? new MenuAction.OpenUrl(url) : new MenuAction.OpenRider([r]))).ToList();
-        var urls = c.Repos.Select(links.RepoBranch).OfType<string>().ToList();
-        if (urls.Count > 0) items.Add(new("Все в GitLab", new MenuAction.OpenUrls(urls)));
-        items.Add(new("Папка в Finder", new MenuAction.Reveal([MenuBuilder.CommonParent(c.Repos)])));
-        return new MenuPage(items);
     }
 }

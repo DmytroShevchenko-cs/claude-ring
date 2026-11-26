@@ -15,17 +15,23 @@ public class RingMenuTests
         key,
         Enumerable.Range(0, repos).Select(i => new RepoRef($"repo{i}", $"/p/repo{i}-{key}", $"feature/{key}", $"https://g/T/repo{i}")).ToList());
 
-    private static readonly RingConfig Config = new()
+    private static readonly IdeSettings Rider = new(IdeType.Rider);
+
+    // Russian labels, like the ring had before settings existed.
+    private static Settings Config(int n = 8, bool jira = true) => new()
     {
-        GitLabBaseUrl = "https://gitlab.example.com",
-        GitLabGroup = "acme",
-        MrTargets = [new("→ Dev", "Dev"), new("→ RC", "RC"), new("→ master", "master")],
-        JiraBaseUrl = "https://j",
+        Language = UiLanguage.Ru,
+        SlotCount = n,
+        Git = new GitSettings(GitHostType.GitLab, "https://gitlab.example.com", "acme", ["Dev", "RC", "master"]),
+        Tracker = jira ? new TrackerSettings(TrackerType.Jira, "https://j") : new TrackerSettings(TrackerType.None),
+        Ide = Rider,
     };
+
+    private static RingMenu Create(IChatSource source, Settings settings) => new(source, new MenuBuilder(settings, Strings.Ru));
 
     private static RingMenu Menu(params ChatContext[] chats)
     {
-        var menu = new RingMenu(new Source(chats), new Links(Config), Config);
+        var menu = Create(new Source(chats), Config());
         menu.Reset();
         return menu;
     }
@@ -62,7 +68,7 @@ public class RingMenuTests
         var r = menu.Click(Array.IndexOf(Labels(menu), "Все"));
 
         Assert.False(r.Reopen);
-        Assert.Equal(new MenuAction.OpenRider(chat.Repos), r.Action);
+        Assert.Equal(new MenuAction.OpenIde(Rider, chat.Repos), r.Action);
         Assert.Equal("PROJ-1069", menu.Render()[0].Label);
     }
 
@@ -94,11 +100,11 @@ public class RingMenuTests
 
         var one = menu.Click(0);
         Assert.False(one.Reopen);
-        Assert.Equal([chat.Repos[0]], ((MenuAction.OpenRider)one.Action!).Repos);
+        Assert.Equal([chat.Repos[0]], ((MenuAction.OpenIde)one.Action!).Repos);
 
         menu = RiderLevel(9, chat);
         var all = menu.Click(7);
-        Assert.Equal(chat.Repos, ((MenuAction.OpenRider)all.Action!).Repos);
+        Assert.Equal(chat.Repos, ((MenuAction.OpenIde)all.Action!).Repos);
     }
 
     [Fact]
@@ -183,15 +189,7 @@ public class RingMenuTests
 
     private static RingMenu MenuN(int n, bool jira, params ChatContext[] chats)
     {
-        var config = new RingConfig
-        {
-            SlotCount = n,
-            GitLabBaseUrl = "https://gitlab.example.com",
-            GitLabGroup = "acme",
-            MrTargets = [new("→ Dev", "Dev"), new("→ RC", "RC"), new("→ master", "master")],
-            JiraBaseUrl = jira ? "https://j" : null,
-        };
-        var menu = new RingMenu(new Source(chats), new Links(config), config);
+        var menu = Create(new Source(chats), Config(n, jira));
         menu.Reset();
         return menu;
     }
@@ -251,7 +249,7 @@ public class RingMenuTests
 
         var labels = Labels(menu);
         Assert.Equal(Enumerable.Range(0, 6).Select(i => $"repo{i}"), labels.Take(6));
-        Assert.Equal("Все в GitLab", labels[6]);
+        Assert.Equal("Все в браузере", labels[6]);
         Assert.Equal("Папка в Finder", labels[7]);
         Assert.Equal("← назад", labels[n - 1]);
     }
@@ -269,7 +267,7 @@ public class RingMenuTests
         var repo = new RepoRef("r", "/p/r", "feature/A-1");
         var chat = new ChatContext(new ChatTab("s", "A-1", "/w"), new SessionInfo(null, null, null, null), "A-1", [repo]);
         var menu = ReposLevel(8, chat);
-        Assert.Equal(new MenuAction.OpenRider([repo]).Repos, ((MenuAction.OpenRider)menu.Click(0).Action!).Repos);
+        Assert.Equal([repo], ((MenuAction.OpenIde)menu.Click(0).Action!).Repos);
     }
 
     [Fact]
@@ -277,7 +275,7 @@ public class RingMenuTests
     {
         var menu = ReposLevel(8, Chat("A-1", 10));
         var labels = Labels(menu);
-        var action = (MenuAction.OpenUrls)menu.Click(Array.IndexOf(labels, "Все в GitLab")).Action!;
+        var action = (MenuAction.OpenUrls)menu.Click(Array.IndexOf(labels, "Все в браузере")).Action!;
         Assert.Equal(Enumerable.Range(0, 10).Select(i => $"https://g/T/repo{i}/-/tree/feature/A-1"), action.Urls);
     }
 
@@ -287,7 +285,7 @@ public class RingMenuTests
         var repo = new RepoRef("r", "/p/r", "feature/A-1");
         var chat = new ChatContext(new ChatTab("s", "A-1", "/w"), new SessionInfo(null, null, null, null), "A-1", [repo]);
         var labels = Labels(ReposLevel(8, chat));
-        Assert.DoesNotContain("Все в GitLab", labels);
+        Assert.DoesNotContain("Все в браузере", labels);
         Assert.Contains("Папка в Finder", labels);
     }
 
@@ -357,7 +355,7 @@ public class RingMenuTests
         var menu = MenuN(8, true, Chat("A-1"));
         menu.Click(0);
         menu.Click(Array.IndexOf(Labels(menu), "Репо"));
-        Assert.Equal("Все в GitLab", Labels(menu)[2]);
+        Assert.Equal("Все в браузере", Labels(menu)[2]);
         Assert.True(menu.Click(7).Reopen);
         Assert.Equal("VS Code", Labels(menu)[0]);
         Assert.Contains("Репо", Labels(menu));
@@ -384,7 +382,7 @@ public class RingMenuTests
     public void Load_failure_keeps_previous_chats_and_sets_error()
     {
         var chats = new[] { Chat("A-1"), Chat("A-2") };
-        var menu = new RingMenu(new FlakySource(chats), new Links(Config), Config);
+        var menu = Create(new FlakySource(chats), Config());
         menu.Reset();
         Assert.Null(menu.LastLoadError);
         Assert.Equal(["A-1", "A-2"], Labels(menu).Take(2));
@@ -408,7 +406,7 @@ public class RingMenuTests
     public void Final_action_returns_to_root_without_reloading()
     {
         var source = new CountingSource(Chat("A-1"), Chat("A-2"));
-        var menu = new RingMenu(source, new Links(Config), Config);
+        var menu = Create(source, Config());
         menu.Reset();
         Assert.Equal(1, source.Loads);
 
@@ -495,4 +493,7 @@ public class RingMenuTests
         Assert.IsType<MenuAction.FocusChat>(r.Action);
         Assert.Equal("A-1", Labels(menu)[0]);
     }
+
+    [Fact]
+    public void Slot_count_comes_from_settings() => Assert.Equal(9, MenuN(9, true, Chat("A-1")).SlotCount);
 }

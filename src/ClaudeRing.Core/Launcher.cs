@@ -1,6 +1,6 @@
 namespace ClaudeRing.Core;
 
-public sealed class Launcher(IProcessRunner runner, RingConfig config, Action<int> sleep)
+public sealed class Launcher(IProcessRunner runner, Action<int> sleep)
 {
     private const string VsCodeBundle = "com.microsoft.VSCode";
 
@@ -12,9 +12,6 @@ public sealed class Launcher(IProcessRunner runner, RingConfig config, Action<in
         sleep(500);
         runner.Start("open", $"vscode://anthropic.claude-code/open?session={tab.SessionId}");
     }
-
-    public void OpenInRider(IEnumerable<RepoRef> repos) =>
-        runner.Start(config.RiderPath, repos.Select(r => r.Path).ToArray());
 
     public void OpenUrl(string url) => runner.Start("open", url);
 

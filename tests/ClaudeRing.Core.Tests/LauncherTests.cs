@@ -5,7 +5,7 @@ using ClaudeRing.Core;
 public class LauncherTests
 {
     private readonly FakeProcessRunner _runner = new();
-    private Launcher Launcher() => new(_runner, new RingConfig(), _ => { });
+    private Launcher Launcher() => new(_runner, _ => { });
 
     [Fact]
     public void Focus_chat_raises_window_then_opens_session()
@@ -13,13 +13,6 @@ public class LauncherTests
         Launcher().FocusChat(new ChatTab("11111111-aaaa-4bbb-8ccc-000000000001", "PROJ-1069", "/Users/me/proj"));
         Assert.Equal(["open", "-b", "com.microsoft.VSCode", "/Users/me/proj"], _runner.Started[0]);
         Assert.Equal(["open", "vscode://anthropic.claude-code/open?session=11111111-aaaa-4bbb-8ccc-000000000001"], _runner.Started[1]);
-    }
-
-    [Fact]
-    public void Rider_gets_all_paths_in_one_call()
-    {
-        Launcher().OpenInRider([new RepoRef("a", "/p/a", "b"), new RepoRef("c", "/p/c", "b")]);
-        Assert.Equal(["/Applications/Rider.app/Contents/MacOS/rider", "/p/a", "/p/c"], _runner.Started.Single());
     }
 
     [Fact]

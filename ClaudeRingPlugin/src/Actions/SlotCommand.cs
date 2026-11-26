@@ -52,7 +52,7 @@ namespace Loupedeck.ClaudeRingPlugin
                 {
                     return " ";
                 }
-                return i < ClaudeRingPlugin.Config.SlotCount ? String.IsNullOrEmpty(slots[i].Label) ? " " : slots[i].Label : " ";
+                return String.IsNullOrEmpty(slots[i].Label) ? " " : slots[i].Label;
             }
             catch (Exception ex)
             {
@@ -132,13 +132,13 @@ namespace Loupedeck.ClaudeRingPlugin
         {
             try
             {
-                if (ClaudeRingPlugin.Menu == null || !Int32.TryParse(actionParameter, out var i)
-                    || i < 0 || i >= ClaudeRingPlugin.Config.SlotCount)
+                var menu = ClaudeRingPlugin.Menu;
+                if (menu == null || !Int32.TryParse(actionParameter, out var i) || i < 0 || i >= menu.SlotCount)
                 {
                     return;
                 }
 
-                var result = ClaudeRingPlugin.Menu.Click(i);
+                var result = menu.Click(i);
                 this.ActionImageChanged();
                 if (result.Action != null)
                 {
@@ -150,11 +150,12 @@ namespace Loupedeck.ClaudeRingPlugin
                         ClaudeRingPlugin.Refresh();
                     });
                 }
-                if (result.Reopen && ClaudeRingPlugin.Config.ReopenDelayMs >= 0)
+                var reopenDelayMs = ClaudeRingPlugin.CurrentSettings.ReopenDelayMs;
+                if (result.Reopen && reopenDelayMs >= 0)
                 {
                     // The ring closes after this click; do not treat that close as "user closed it".
                     RingWatcher.ExpectPluginReopen();
-                    RingReopener.ShowAfter(ClaudeRingPlugin.Config.ReopenDelayMs);
+                    RingReopener.ShowAfter(reopenDelayMs);
                 }
             }
             catch (Exception ex)

@@ -15,13 +15,13 @@ public sealed class ChatSource(OpenChatsReader tabs, SessionInfoReader sessions,
             return new ChatContext(tab, info, key, key == null ? [] : repos.Find(key));
         }).ToList();
 
-    public static ChatSource CreateDefault(RingConfig config, IProcessRunner runner)
+    public static ChatSource CreateDefault(Settings settings, IProcessRunner runner)
     {
-        var home = RingConfig.Home;
+        var home = Settings.Home;
         return new ChatSource(
             new OpenChatsReader(Path.Combine(home, "Library", "Application Support", "Code", "User"),
                 Path.Combine(home, ".claude", "ide"), runner, OpenChatsReader.IsPidAlive),
             new SessionInfoReader(Path.Combine(home, ".claude", "projects")),
-            new RepoFinder(config.RepoRoots));
+            new RepoFinder(settings.RepoRoots));
     }
 }
