@@ -1,11 +1,28 @@
 {
+  "language": "auto",
   "repoRoots": ["~/Projects"],
-  "gitLabBaseUrl": "https://gitlab.example.com",
-  "gitLabGroup": "acme",
-  "jiraBaseUrl": "https://example.atlassian.net",
-  "mrTargets": [
-    { "label": "→ develop", "branch": "develop" },
-    { "label": "→ main", "branch": "main" }
+  "taskKeyPattern": "(?<![A-Za-z0-9])[A-Z][A-Z0-9]+-\\d+(?!\\d)",
+  "git": {
+    "host": "gitlab",
+    "baseUrl": "https://gitlab.example.com",
+    "group": "acme",
+    "targets": ["develop", { "label": "prod", "branches": ["master", "main"] }]
+  },
+  "tracker": {
+    "type": "jira",
+    "baseUrl": "https://example.atlassian.net"
+  },
+  "ide": {
+    "type": "rider"
+  },
+  "chatMenu": [
+    "chat",
+    "ide",
+    "reviews",
+    "issue",
+    "repos",
+    { "label": "Sentry", "url": "https://sentry.io/issues/?query={key}" },
+    { "label": "Terminal", "run": ["open", "-a", "Terminal", "{repo.path}"], "perRepo": true }
   ],
   "slotCount": 9,
   "reopenDelayMs": 150,
