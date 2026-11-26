@@ -160,38 +160,18 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
     // One repo per slot, then "Все"; repos that do not fit are reachable only through "Все".
     private MenuPage RiderPage(ChatContext c)
     {
-        var items = c.Repos.Take(N - 2).Select(r => new MenuItem(DisplayName(r, c.TaskKey), new MenuAction.OpenRider([r]))).ToList();
+        var items = c.Repos.Take(N - 2).Select(r => new MenuItem(MenuBuilder.DisplayName(r, c.TaskKey), new MenuAction.OpenRider([r]))).ToList();
         items.Add(new("Все", new MenuAction.OpenRider(c.Repos)));
         return new MenuPage(items);
     }
 
-    // Repo folder name without the trailing "-<TaskKey>" (old flat layout).
-    private static string DisplayName(RepoRef r, string? key)
-    {
-        var suffix = "-" + key;
-        return key != null && r.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && r.Name.Length > suffix.Length
-            ? r.Name[..^suffix.Length]
-            : r.Name;
-    }
-
     private MenuPage RepoPage(ChatContext c)
     {
-        var items = c.Repos.Take(N - 3).Select(r => new MenuItem(DisplayName(r, c.TaskKey),
+        var items = c.Repos.Take(N - 3).Select(r => new MenuItem(MenuBuilder.DisplayName(r, c.TaskKey),
             links.RepoBranch(r) is { } url ? new MenuAction.OpenUrl(url) : new MenuAction.OpenRider([r]))).ToList();
         var urls = c.Repos.Select(links.RepoBranch).OfType<string>().ToList();
         if (urls.Count > 0) items.Add(new("Все в GitLab", new MenuAction.OpenUrls(urls)));
-        items.Add(new("Папка в Finder", new MenuAction.Reveal([CommonParent(c.Repos)])));
+        items.Add(new("Папка в Finder", new MenuAction.Reveal([MenuBuilder.CommonParent(c.Repos)])));
         return new MenuPage(items);
-    }
-
-    // Deepest directory that contains the parent folders of all repos.
-    private static string CommonParent(IReadOnlyList<RepoRef> repos)
-    {
-        var parts = repos
-            .Select(r => (Path.GetDirectoryName(r.Path) ?? "/").Split('/', StringSplitOptions.RemoveEmptyEntries))
-            .ToList();
-        var common = parts[0].AsEnumerable();
-        foreach (var p in parts.Skip(1)) common = common.Zip(p).TakeWhile(x => x.First == x.Second).Select(x => x.First);
-        return "/" + string.Join('/', common);
     }
 }
