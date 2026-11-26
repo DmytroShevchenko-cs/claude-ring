@@ -1,0 +1,13 @@
+{
+  "repoRoots": ["~/Projects"],
+  "gitLabBaseUrl": "https://gitlab.example.com",
+  "gitLabGroup": "acme",
+  "jiraBaseUrl": "https://example.atlassian.net",
+  "mrTargets": [
+    { "label": "→ develop", "branch": "develop" },
+    { "label": "→ main", "branch": "main" }
+  ],
+  "slotCount": 9,
+  "reopenDelayMs": 150,
+  "resetOnRingEvent": ""
+}

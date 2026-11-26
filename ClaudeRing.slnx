@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/ClaudeRingPlugin/" />
+  <Folder Name="/ClaudeRingPlugin/src/">
+    <Project Path="ClaudeRingPlugin/src/ClaudeRingPlugin.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/ClaudeRing.Core/ClaudeRing.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ClaudeRing.Core.Tests/ClaudeRing.Core.Tests.csproj" />
+  </Folder>
+</Solution>
