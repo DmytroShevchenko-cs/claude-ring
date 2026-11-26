@@ -451,4 +451,48 @@ public class RingMenuTests
 
         Assert.Null(renderError);
     }
+
+    [Fact]
+    public void Back_twice_from_submenu_returns_to_root()
+    {
+        var menu = Menu(Chat("PROJ-1069"));
+        menu.Click(0);
+        menu.Click(2);
+        Assert.True(menu.Click(7).Reopen);
+        Assert.Equal("VS Code", Labels(menu)[0]);
+        Assert.True(menu.Click(7).Reopen);
+        Assert.Equal("PROJ-1069", Labels(menu)[0]);
+    }
+
+    [Fact]
+    public void Reset_from_submenu_returns_to_root()
+    {
+        var menu = Menu(Chat("PROJ-1069"));
+        menu.Click(0);
+        menu.Click(2);
+        menu.Reset();
+        Assert.Equal("PROJ-1069", Labels(menu)[0]);
+    }
+
+    [Fact]
+    public void Back_to_root_keeps_the_chat_page()
+    {
+        var menu = MenuN(8, false, Enumerable.Range(1, 10).Select(i => Chat($"A-{i}")).ToArray());
+        menu.Click(7);
+        menu.Click(0);
+        Assert.Equal("VS Code", Labels(menu)[0]);
+        menu.Click(7);
+        Assert.Equal("A-8", Labels(menu)[0]);
+    }
+
+    [Fact]
+    public void Final_action_from_a_later_page_returns_to_the_first_page()
+    {
+        var menu = MenuN(8, false, Enumerable.Range(1, 10).Select(i => Chat($"A-{i}")).ToArray());
+        menu.Click(7);
+        menu.Click(0);
+        var r = menu.Click(0);
+        Assert.IsType<MenuAction.FocusChat>(r.Action);
+        Assert.Equal("A-1", Labels(menu)[0]);
+    }
 }

@@ -18,18 +18,16 @@ public sealed record SlotView(string Label, bool Enabled);
 
 public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
 {
-    private enum Level { Root, Chat, Mr, Repos, Rider }
-
-    // One ring item: what it shows and what a click does.
-    private sealed record Item(string Label, Func<ClickResult> OnClick);
+    // One ring slot: what it shows and what a click does.
+    private sealed record Slot(string Label, Func<ClickResult> OnClick);
 
     private const string Back = "← назад";
     private const string More = "ещё ›";
 
     private readonly object _lock = new();
+    // Pages opened from the root; the top one is shown. Empty means the root page.
+    private readonly Stack<MenuPage> _pages = new();
     private IReadOnlyList<ChatContext> _chats = [];
-    private Level _level = Level.Root;
-    private ChatContext? _chat;
     private int _page;
 
     private int N => config.SlotCount;
@@ -55,9 +53,7 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
         {
             if (loaded != null) _chats = loaded;
             LastLoadError = error;
-            _level = Level.Root;
-            _chat = null;
-            _page = 0;
+            ToRoot();
         }
     }
 
@@ -65,55 +61,42 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
     {
         lock (_lock)
         {
-            var items = Items();
+            var slots = Slots();
             return Enumerable.Range(0, N)
-                .Select(i => i < items.Count && items[i] != null ? new SlotView(items[i]!.Label, true) : new SlotView("", false))
+                .Select(i => i < slots.Count && slots[i] != null ? new SlotView(slots[i]!.Label, true) : new SlotView("", false))
                 .ToList();
         }
     }
 
-    // A final action switches to the root level at once, under the lock. It does not reload chats:
+    // A final action switches to the root page at once, under the lock. It does not reload chats:
     // the caller reloads chats after running the action, so the action never waits for the reload.
     public ClickResult Click(int slot)
     {
         ClickResult result;
         lock (_lock)
         {
-            var items = Items();
-            if (slot < 0 || slot >= items.Count || items[slot] == null) return new ClickResult(null, false);
+            var slots = Slots();
+            if (slot < 0 || slot >= slots.Count || slots[slot] == null) return new ClickResult(null, false);
 
-            result = items[slot]!.OnClick();
-            if (!result.Reopen)
-            {
-                _level = Level.Root;
-                _chat = null;
-                _page = 0;
-            }
+            result = slots[slot]!.OnClick();
+            if (!result.Reopen) ToRoot();
         }
         return result;
     }
 
-    // Builds the slot list for the current level. Null means an empty slot.
-    private List<Item?> Items() => _level switch
-    {
-        Level.Root => RootItems(),
-        Level.Chat => WithBack(ChatItems(_chat!)),
-        Level.Mr => WithBack(MrItems(_chat!)),
-        Level.Repos => WithBack(RepoItems(_chat!)),
-        Level.Rider => WithBack(RiderItems(_chat!)),
-        _ => [],
-    };
+    // Slots of the shown page. Null means an empty slot.
+    private List<Slot?> Slots() => _pages.Count == 0 ? RootSlots() : PageSlots(_pages.Peek());
 
-    private List<Item?> RootItems()
+    private List<Slot?> RootSlots()
     {
         var perPage = PerPage();
         var page = CurrentPage();
         var pageChats = _chats.Skip(page * perPage).Take(perPage)
-            .Select(c => (Item?)new Item(c.Label, () => Go(Level.Chat, c))).ToList();
+            .Select(c => (Slot?)new Slot(c.Label, () => Push(ChatPage(c)))).ToList();
         if (_chats.Count > N)
         {
             while (pageChats.Count < N - 1) pageChats.Add(null);
-            pageChats.Add(new Item(More, () => { _page = (CurrentPage() + 1) % PageCount(); return new ClickResult(null, true); }));
+            pageChats.Add(new Slot(More, () => { _page = (CurrentPage() + 1) % PageCount(); return new ClickResult(null, true); }));
         }
         return pageChats;
     }
@@ -125,49 +108,80 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
     // An out-of-range page falls back to the first one.
     private int CurrentPage() => _page >= 0 && _page < PageCount() ? _page : 0;
 
-    private List<Item> ChatItems(ChatContext c)
+    // Page items in order; "back" goes into the last slot.
+    private List<Slot?> PageSlots(MenuPage page)
     {
-        var items = new List<Item> { new("VS Code", () => Done(new MenuAction.FocusChat(c.Tab))) };
-        if (c.TaskKey == null) return items;
-        if (c.Repos.Count > 0) items.Add(new("Rider", () => Go(Level.Rider, c)));
-        items.Add(new("MR", () => Go(Level.Mr, c)));
-        if (links.JiraIssue(c.TaskKey) is { } jira) items.Add(new("Jira", () => Done(new MenuAction.OpenUrl(jira))));
-        if (c.Repos.Count > 0) items.Add(new("Репо", () => Go(Level.Repos, c)));
-        return items;
+        var slots = page.Items.Take(N - 1).Select(i => (Slot?)new Slot(i.Label, () => Open(i))).ToList();
+        while (slots.Count < N - 1) slots.Add(null);
+        slots.Add(new Slot(Back, Pop));
+        return slots;
     }
 
-    private List<Item> MrItems(ChatContext c)
+    // A submenu goes on top of the stack; a final action goes back to the caller.
+    private ClickResult Open(MenuItem item) =>
+        item.Submenu != null ? Push(item.Submenu) : new ClickResult(item.Action, false);
+
+    private ClickResult Push(MenuPage page)
     {
-        var items = new List<Item> { new("Все MR", () => Done(new MenuAction.OpenUrl(links.GroupMrs(c.TaskKey!)))) };
-        items.AddRange(config.MrTargets.Select(t => new Item(t.Label, () => Done(new MenuAction.OpenUrl(links.GroupMrs(c.TaskKey!, t.Branch))))));
-        return items;
+        _pages.Push(page);
+        return new ClickResult(null, true);
+    }
+
+    private ClickResult Pop()
+    {
+        _pages.TryPop(out _);
+        return new ClickResult(null, true);
+    }
+
+    private void ToRoot()
+    {
+        _pages.Clear();
+        _page = 0;
+    }
+
+    private MenuPage ChatPage(ChatContext c)
+    {
+        var items = new List<MenuItem> { new("VS Code", new MenuAction.FocusChat(c.Tab)) };
+        if (c.TaskKey == null) return new MenuPage(items);
+        if (c.Repos.Count > 0) items.Add(new("Rider", Submenu: RiderPage(c)));
+        items.Add(new("MR", Submenu: MrPage(c)));
+        if (links.JiraIssue(c.TaskKey) is { } jira) items.Add(new("Jira", new MenuAction.OpenUrl(jira)));
+        if (c.Repos.Count > 0) items.Add(new("Репо", Submenu: RepoPage(c)));
+        return new MenuPage(items);
+    }
+
+    private MenuPage MrPage(ChatContext c)
+    {
+        var items = new List<MenuItem> { new("Все MR", new MenuAction.OpenUrl(links.GroupMrs(c.TaskKey!))) };
+        items.AddRange(config.MrTargets.Select(t => new MenuItem(t.Label, new MenuAction.OpenUrl(links.GroupMrs(c.TaskKey!, t.Branch)))));
+        return new MenuPage(items);
     }
 
     // One repo per slot, then "Все"; repos that do not fit are reachable only through "Все".
-    private List<Item> RiderItems(ChatContext c)
+    private MenuPage RiderPage(ChatContext c)
     {
-        var items = c.Repos.Take(N - 2).Select(r => new Item(DisplayName(r), () => Done(new MenuAction.OpenRider([r])))).ToList();
-        items.Add(new("Все", () => Done(new MenuAction.OpenRider(c.Repos))));
-        return items;
+        var items = c.Repos.Take(N - 2).Select(r => new MenuItem(DisplayName(r, c.TaskKey), new MenuAction.OpenRider([r]))).ToList();
+        items.Add(new("Все", new MenuAction.OpenRider(c.Repos)));
+        return new MenuPage(items);
     }
 
     // Repo folder name without the trailing "-<TaskKey>" (old flat layout).
-    private string DisplayName(RepoRef r)
+    private static string DisplayName(RepoRef r, string? key)
     {
-        var suffix = "-" + _chat!.TaskKey;
-        return _chat.TaskKey != null && r.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && r.Name.Length > suffix.Length
+        var suffix = "-" + key;
+        return key != null && r.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && r.Name.Length > suffix.Length
             ? r.Name[..^suffix.Length]
             : r.Name;
     }
 
-    private List<Item> RepoItems(ChatContext c)
+    private MenuPage RepoPage(ChatContext c)
     {
-        var items = c.Repos.Take(N - 3).Select(r => new Item(DisplayName(r), () =>
-            Done(links.RepoBranch(r) is { } url ? new MenuAction.OpenUrl(url) : new MenuAction.OpenRider([r])))).ToList();
+        var items = c.Repos.Take(N - 3).Select(r => new MenuItem(DisplayName(r, c.TaskKey),
+            links.RepoBranch(r) is { } url ? new MenuAction.OpenUrl(url) : new MenuAction.OpenRider([r]))).ToList();
         var urls = c.Repos.Select(links.RepoBranch).OfType<string>().ToList();
-        if (urls.Count > 0) items.Add(new("Все в GitLab", () => Done(new MenuAction.OpenUrls(urls))));
-        items.Add(new("Папка в Finder", () => Done(new MenuAction.Reveal([CommonParent(c.Repos)]))));
-        return items;
+        if (urls.Count > 0) items.Add(new("Все в GitLab", new MenuAction.OpenUrls(urls)));
+        items.Add(new("Папка в Finder", new MenuAction.Reveal([CommonParent(c.Repos)])));
+        return new MenuPage(items);
     }
 
     // Deepest directory that contains the parent folders of all repos.
@@ -180,28 +194,4 @@ public sealed class RingMenu(IChatSource source, Links links, RingConfig config)
         foreach (var p in parts.Skip(1)) common = common.Zip(p).TakeWhile(x => x.First == x.Second).Select(x => x.First);
         return "/" + string.Join('/', common);
     }
-
-    // Puts "back" into the last slot, the rest stays in order.
-    private List<Item?> WithBack(List<Item> items)
-    {
-        var slots = items.Take(N - 1).Cast<Item?>().ToList();
-        while (slots.Count < N - 1) slots.Add(null);
-        slots.Add(new Item(Back, GoBack));
-        return slots;
-    }
-
-    private ClickResult Go(Level level, ChatContext chat)
-    {
-        _chat = chat;
-        _level = level;
-        return new ClickResult(null, true);
-    }
-
-    private ClickResult GoBack()
-    {
-        _level = _level == Level.Chat ? Level.Root : Level.Chat;
-        return new ClickResult(null, true);
-    }
-
-    private static ClickResult Done(MenuAction action) => new(action, false);
 }
