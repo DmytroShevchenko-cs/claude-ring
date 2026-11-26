@@ -13,7 +13,7 @@ move through pages:
 
 - **Chats**: one slot per open Claude Code chat (label is the task key, e.g. `PROJ-123`).
   With more chats than slots, the last slot is **more ›** and shows the next chats.
-- **Chat page**: the items from `chatMenu`. By default: VS Code, IDE ▸, MR/PR ▸, issue, Repos ▸.
+- **Chat page**: the items from `chatMenu`. By default: VS Code, IDE ▸, MR/PR ▸, issue, Repos ▸. The IDE and issue items appear once `ide` / `tracker` are configured.
   You can reorder them, hide them and add your own links and commands.
 - **Submenus**: pick one repository, or all of them.
 - **Back** is always in the last slot of a chat page or submenu.
@@ -63,7 +63,6 @@ with its field path (for example `git.host: unknown value "bitbucket"`) to the p
 {
   "language": "auto",                         // auto | en | ru
   "repoRoots": ["~/Projects"],                // where to look for repositories
-  "taskKeyPattern": "#(\\d+)",                // how to find the task key (here: GitHub issue numbers)
 
   "git": {
     "host": "gitlab",                         // gitlab | github
@@ -158,7 +157,7 @@ Placeholders:
 |---|---|
 | `{key}` | Task key |
 | `{branch}` | The chat's git branch, or the branch of the first repository |
-| `{title}` | Chat title (custom title, else tab title) |
+| `{title}` | Chat title (custom title, else tab title, else AI title) |
 | `{sessionId}` | Claude Code session id |
 | `{repos.parent}` | Folder that contains all of the chat's repositories |
 | `{repo.name}`, `{repo.path}`, `{repo.webUrl}`, `{repo.branch}` | The repository, only with `"perRepo": true` |
@@ -196,6 +195,7 @@ More details are in [`docs/spike-results.md`](docs/spike-results.md).
 - There is no ring-close event, so the current page stays until you run an action or press Back.
 - An empty VS Code window cannot be targeted precisely.
 - Config changes are watched only when the folder `~/.config/claude-ring` exists when the plugin starts.
+- If `config.json` is a symlink, edits to the link target are not seen by hot reload. Save the real file or reload the plugin.
 - macOS only.
 
 ## License

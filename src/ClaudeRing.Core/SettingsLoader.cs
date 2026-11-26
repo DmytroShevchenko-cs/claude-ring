@@ -108,7 +108,8 @@ public static class SettingsLoader
 
             return new Settings
             {
-                Language = Choice(root, "language", "language", Languages) ?? defaults.Language,
+                // Old configs had Russian labels only.
+                Language = Choice(root, "language", "language", Languages) ?? (legacy.Count > 0 ? UiLanguage.Ru : defaults.Language),
                 RepoRoots = RepoRoots(root) ?? defaults.RepoRoots,
                 TaskKeyPattern = Pattern(root) ?? defaults.TaskKeyPattern,
                 Git = Git(root),
@@ -300,6 +301,7 @@ public static class SettingsLoader
                     return Skip(path, "\"run\" must be a list of strings");
                 run = runValue.EnumerateArray().Select(x => x.GetString()!).ToList();
             }
+            if (url?.Length == 0) url = null;
             if ((url == null) == (run == null)) return Skip(path, "needs exactly one of \"url\" and \"run\"");
             if (run != null && (run.Count == 0 || run[0].Length == 0)) return Skip(path, "\"run\" needs a program first");
             if (run != null && Template.Placeholders(run[0]).Count > 0)

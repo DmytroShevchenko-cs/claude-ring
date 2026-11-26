@@ -33,6 +33,13 @@ public static class IdeLauncher
         return Table.TryGetValue(ide.Type, out var known) ? known.Name : "";
     }
 
+    // App bundle folder of the IDE: the configured app or the default one. Null for IdeType.None.
+    public static string? AppPath(IdeSettings ide)
+    {
+        if (ide.Type == IdeType.Custom) return ide.App?.TrimEnd('/');
+        return Table.TryGetValue(ide.Type, out var known) ? (ide.App ?? known.App).TrimEnd('/') : null;
+    }
+
     // Processes to start. Empty for IdeType.None or when there are no paths.
     public static IReadOnlyList<MenuAction.Run> Commands(IdeSettings ide, IReadOnlyList<string> paths)
     {

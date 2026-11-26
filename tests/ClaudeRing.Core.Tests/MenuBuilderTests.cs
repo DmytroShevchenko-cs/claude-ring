@@ -244,4 +244,29 @@ public class MenuBuilderTests
 
         public int GetHashCode(MenuAction? obj) => 0;
     }
+
+    [Fact]
+    public void Legacy_config_builds_the_old_russian_menu()
+    {
+        var settings = SettingsLoader.Parse("""
+            {
+              "repoRoots": ["/p"],
+              "gitLabBaseUrl": "https://gitlab.example.com",
+              "gitLabGroup": "acme",
+              "jiraBaseUrl": "https://example.atlassian.net",
+              "mrTargets": [ { "label": "→ Dev", "branch": "Dev" }, { "label": "→ RC", "branch": "RC" }, { "label": "→ master", "branch": "master" } ],
+              "slotCount": 9,
+              "reopenDelayMs": 150,
+              "resetOnRingEvent": ""
+            }
+            """).Settings!;
+        var page = new MenuBuilder(settings, Strings.For(settings.Language, () => "en")).ChatPage(Chat());
+
+        Assert.Equal(["VS Code", "Rider", "MR", "Jira", "Репо"], Labels(page));
+        var reviews = Find(page, "MR").Submenu!;
+        Assert.Equal(["Все MR", "→ Dev", "→ RC", "→ master"], Labels(reviews));
+        Assert.Equal(
+            new MenuAction.OpenUrl("https://gitlab.example.com/groups/acme/-/merge_requests?scope=all&state=all&search=A-1&target_branch=Dev"),
+            reviews.Items[1].Action);
+    }
 }

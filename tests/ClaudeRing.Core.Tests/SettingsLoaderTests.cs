@@ -161,6 +161,14 @@ public class SettingsLoaderTests
     }
 
     [Fact]
+    public void Legacy_config_without_language_uses_russian()
+    {
+        Assert.Equal(UiLanguage.Ru, Valid("""{ "jiraBaseUrl": "https://example.atlassian.net" }""").Language);
+        Assert.Equal(UiLanguage.En, Valid("""{ "jiraBaseUrl": "https://example.atlassian.net", "language": "en" }""").Language);
+        Assert.Equal(UiLanguage.Auto, Valid("""{ "repoRoots": ["/work"] }""").Language);
+    }
+
+    [Fact]
     public void Legacy_rider_path_gives_the_app()
     {
         var s = Valid("""{ "riderPath": "/Apps/Rider 2025.app/Contents/MacOS/rider" }""");
@@ -253,6 +261,7 @@ public class SettingsLoaderTests
     [Theory]
     [InlineData("""{ "url": "https://x/{key}" }""")]
     [InlineData("""{ "label": "X" }""")]
+    [InlineData("""{ "label": "X", "url": "" }""")]
     [InlineData("""{ "label": "X", "url": "https://x", "run": ["open"] }""")]
     [InlineData("""{ "label": "X", "run": [] }""")]
     [InlineData("""{ "label": "X", "run": ["open", 5] }""")]

@@ -32,10 +32,41 @@ public class LauncherTests
     [Fact]
     public void Open_ide_starts_every_command()
     {
-        Launcher().OpenIde(new IdeSettings(IdeType.Cursor), [new RepoRef("a", "/p/a", "b"), new RepoRef("c", "/p/c", "b")]);
+        using var dir = new TempDir();
+        var app = Path.Combine(dir.Path, "Cursor.app");
+        Directory.CreateDirectory(app);
+        Launcher().OpenIde(new IdeSettings(IdeType.Cursor, app), [new RepoRef("a", "/p/a", "b"), new RepoRef("c", "/p/c", "b")]);
         Assert.Equal(2, _runner.Started.Count);
-        Assert.Equal(["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "-n", "/p/a"], _runner.Started[0]);
-        Assert.Equal(["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "-n", "/p/c"], _runner.Started[1]);
+        Assert.Equal([$"{app}/Contents/Resources/app/bin/cursor", "-n", "/p/a"], _runner.Started[0]);
+        Assert.Equal([$"{app}/Contents/Resources/app/bin/cursor", "-n", "/p/c"], _runner.Started[1]);
+    }
+
+    [Fact]
+    public void Open_ide_with_missing_app_throws_with_the_path_and_starts_nothing()
+    {
+        using var dir = new TempDir();
+        var app = Path.Combine(dir.Path, "Nope.app");
+        var ex = Assert.Throws<FileNotFoundException>(() =>
+            Launcher().OpenIde(new IdeSettings(IdeType.Custom, app), [new RepoRef("a", "/p/a", "b")]));
+        Assert.Contains(app, ex.Message);
+        Assert.Empty(_runner.Started);
+    }
+
+    [Fact]
+    public void Open_ide_with_existing_custom_app_runs_open()
+    {
+        using var dir = new TempDir();
+        var app = Path.Combine(dir.Path, "X.app");
+        Directory.CreateDirectory(app);
+        Launcher().OpenIde(new IdeSettings(IdeType.Custom, app), [new RepoRef("a", "/p/a", "b")]);
+        Assert.Equal(["open", "-a", app, "/p/a"], _runner.Started.Single());
+    }
+
+    [Fact]
+    public void Open_ide_none_does_nothing()
+    {
+        Launcher().OpenIde(new IdeSettings(IdeType.None), [new RepoRef("a", "/p/a", "b")]);
+        Assert.Empty(_runner.Started);
     }
 
     [Fact]
