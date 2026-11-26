@@ -26,7 +26,8 @@ public sealed class Launcher(IProcessRunner runner, Action<int> sleep)
     public void OpenIde(IdeSettings ide, IReadOnlyList<RepoRef> repos)
     {
         // "open -a" fails silently for a missing app, so check the bundle first.
-        if (repos.Count > 0 && IdeLauncher.AppPath(ide) is { } app && !Directory.Exists(app))
+        // A plain app name (no path) is found by "open -a" itself.
+        if (repos.Count > 0 && IdeLauncher.AppPath(ide) is { } app && Path.IsPathRooted(app) && !Directory.Exists(app))
             throw new FileNotFoundException($"IDE app not found: {app}", app);
         foreach (var command in IdeLauncher.Commands(ide, repos.Select(r => r.Path).ToList())) Run(command.File, command.Args);
     }

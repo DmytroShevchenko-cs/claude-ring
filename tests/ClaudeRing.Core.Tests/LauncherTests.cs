@@ -63,6 +63,13 @@ public class LauncherTests
     }
 
     [Fact]
+    public void Open_ide_with_custom_app_name_leaves_the_lookup_to_open()
+    {
+        Launcher().OpenIde(new IdeSettings(IdeType.Custom, "Some Editor"), [new RepoRef("a", "/p/a", "b")]);
+        Assert.Equal(["open", "-a", "Some Editor", "/p/a"], _runner.Started.Single());
+    }
+
+    [Fact]
     public void Open_ide_none_does_nothing()
     {
         Launcher().OpenIde(new IdeSettings(IdeType.None), [new RepoRef("a", "/p/a", "b")]);
