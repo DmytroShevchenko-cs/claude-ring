@@ -4,8 +4,8 @@ using ClaudeRing.Core;
 
 public class GitHostTests
 {
-    private static readonly GitSettings GitLab = new(GitHostType.GitLab, "https://gitlab.example.com", "acme", ["main"]);
-    private static readonly GitSettings GitHub = new(GitHostType.GitHub, "https://github.com", null, ["main"]);
+    private static readonly GitSettings GitLab = new(GitHostType.GitLab, "https://gitlab.example.com", "acme", [ReviewTarget.Branch("main")]);
+    private static readonly GitSettings GitHub = new(GitHostType.GitHub, "https://github.com", null, [ReviewTarget.Branch("main")]);
 
     [Fact]
     public void Factory_picks_the_host()

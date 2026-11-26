@@ -103,4 +103,25 @@ public class RepoFinderTests
 
         Assert.Null(Assert.Single(new RepoFinder([dir.Path]).Find("A-4")).WebUrl);
     }
+
+    [Fact]
+    public void Remote_branch_from_loose_ref_packed_refs_and_worktree()
+    {
+        using var dir = new TempDir();
+        dir.Write("a/.git/HEAD", "ref: refs/heads/x\n");
+        dir.Write("a/.git/refs/remotes/origin/master", "0000000000000000000000000000000000000000\n");
+        dir.Write("b/.git/HEAD", "ref: refs/heads/x\n");
+        dir.Write("b/.git/packed-refs", "# pack-refs with: peeled fully-peeled sorted\n1111111111111111111111111111111111111111 refs/remotes/origin/main\n");
+        dir.Write("main/.git/worktrees/wt/HEAD", "ref: refs/heads/x\n");
+        dir.Write("main/.git/worktrees/wt/commondir", "../..\n");
+        dir.Write("main/.git/refs/remotes/origin/main", "2222222222222222222222222222222222222222\n");
+        dir.Write("wt/.git", $"gitdir: {Path.Combine(dir.Path, "main/.git/worktrees/wt")}\n");
+
+        Assert.True(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "a"), "master"));
+        Assert.False(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "a"), "main"));
+        Assert.True(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "b"), "main"));
+        Assert.False(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "b"), "master"));
+        Assert.True(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "wt"), "main"));
+        Assert.False(RepoFinder.HasRemoteBranch(Path.Combine(dir.Path, "missing"), "main"));
+    }
 }

@@ -7,13 +7,15 @@ public sealed class MenuBuilder
     private readonly Settings _settings;
     private readonly IGitHost _git;
     private readonly ITracker _tracker;
+    private readonly Func<RepoRef, string, bool> _hasRemoteBranch;
 
-    public MenuBuilder(Settings settings, Strings strings)
+    public MenuBuilder(Settings settings, Strings strings, Func<RepoRef, string, bool>? hasRemoteBranch = null)
     {
         _settings = settings;
         Strings = strings;
         _git = GitHosts.Create(settings.Git);
         _tracker = Trackers.Create(settings.Tracker);
+        _hasRemoteBranch = hasRemoteBranch ?? ((r, b) => RepoFinder.HasRemoteBranch(r.Path, b));
     }
 
     public Strings Strings { get; }
@@ -67,8 +69,22 @@ public sealed class MenuBuilder
         {
             new(Strings.AllReviews(_git.ReviewsLabel), new MenuAction.OpenUrl(_git.ReviewsUrl(key, null))),
         };
-        items.AddRange(_settings.Git.Targets.Select(t => new MenuItem(Strings.Target(t), new MenuAction.OpenUrl(_git.ReviewsUrl(key, t)))));
+        items.AddRange(_settings.Git.Targets.Take(N - 2).Select(t => new MenuItem(Strings.Target(t.Label), TargetAction(key, t, c.Repos))));
         return new MenuItem(_git.ReviewsLabel, Submenu: new MenuPage(items));
+    }
+
+    // Several branch names: open only the ones some repo has on origin; if none is found, open all of them.
+    private MenuAction TargetAction(string key, ReviewTarget target, IReadOnlyList<RepoRef> repos)
+    {
+        var branches = target.Branches;
+        if (branches.Count > 1)
+        {
+            var found = branches.Where(b => repos.Any(r => _hasRemoteBranch(r, b))).ToList();
+            if (found.Count > 0) branches = found;
+        }
+        return branches.Count == 1
+            ? new MenuAction.OpenUrl(_git.ReviewsUrl(key, branches[0]))
+            : new MenuAction.OpenUrls(branches.Select(b => _git.ReviewsUrl(key, b)).ToList());
     }
 
     private MenuItem? IssueItem(ChatContext c) =>

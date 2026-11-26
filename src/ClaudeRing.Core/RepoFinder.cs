@@ -59,23 +59,44 @@ public sealed class RepoFinder(IEnumerable<string> roots)
         return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(repo, path));
     }
 
+    // Folder with config, refs and packed-refs. For a worktree it is the main repo's .git folder.
+    private static string? CommonGitDir(string repo)
+    {
+        var git = Path.Combine(repo, ".git");
+        if (Directory.Exists(git)) return git;
+        if (!File.Exists(git)) return null;
+        var gitDir = ParseGitDir(git, repo);
+        if (gitDir == null) return null;
+        var commonFile = Path.Combine(gitDir, "commondir");
+        return File.Exists(commonFile)
+            ? Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(commonFile).Trim()))
+            : gitDir;
+    }
+
+    // True when the repo knows the branch on origin (from the last fetch). Reads files only.
+    public static bool HasRemoteBranch(string repoPath, string branch)
+    {
+        try
+        {
+            if (CommonGitDir(repoPath) is not { } dir) return false;
+            var name = "refs/remotes/origin/" + branch;
+            if (File.Exists(Path.Combine(dir, name))) return true;
+            var packed = Path.Combine(dir, "packed-refs");
+            return File.Exists(packed)
+                && File.ReadLines(packed).Any(line => line.Split(' ') is [_, var refName] && refName == name);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     // Web URL of the "origin" remote, or null when it cannot be read.
     private static string? ReadWebUrl(string repo)
     {
         try
         {
-            var git = Path.Combine(repo, ".git");
-            string configDir;
-            if (Directory.Exists(git)) configDir = git;
-            else
-            {
-                var gitDir = ParseGitDir(git, repo);
-                if (gitDir == null) return null;
-                var commonFile = Path.Combine(gitDir, "commondir");
-                configDir = File.Exists(commonFile)
-                    ? Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(commonFile).Trim()))
-                    : gitDir;
-            }
+            if (CommonGitDir(repo) is not { } configDir) return null;
             var config = Path.Combine(configDir, "config");
             return File.Exists(config) ? ToWebUrl(OriginUrl(File.ReadAllLines(config))) : null;
         }

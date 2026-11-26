@@ -18,7 +18,7 @@ public class MenuBuilderTests
     private static Settings Config(params MenuEntry[] menu) => new()
     {
         SlotCount = 8,
-        Git = new GitSettings(GitHostType.GitLab, "https://gitlab.example.com", "acme", ["develop", "main"]),
+        Git = new GitSettings(GitHostType.GitLab, "https://gitlab.example.com", "acme", [ReviewTarget.Branch("develop"), ReviewTarget.Branch("main")]),
         Tracker = new TrackerSettings(TrackerType.Jira, "https://j"),
         Ide = Rider,
         ChatMenu = menu.Length == 0 ? new Settings().ChatMenu : menu,
@@ -94,7 +94,7 @@ public class MenuBuilderTests
     [Fact]
     public void Github_reviews_submenu()
     {
-        var settings = Config() with { Git = new GitSettings(GitHostType.GitHub, "https://github.com", "acme", ["main"]) };
+        var settings = Config() with { Git = new GitSettings(GitHostType.GitHub, "https://github.com", "acme", [ReviewTarget.Branch("main")]) };
         var reviews = Find(Page(settings, Chat()), "PR").Submenu!;
         Assert.Equal(["All PRs", "→ main"], Labels(reviews));
         Assert.Equal(new MenuAction.OpenUrl("https://github.com/pulls?q=is:pr+A-1+org:acme"), reviews.Items[0].Action);
@@ -182,4 +182,66 @@ public class MenuBuilderTests
     [Fact]
     public void Per_repo_submenu_fits_the_slots() =>
         Assert.Equal(7, Find(Page(Config(RunItem("T", true, "open", "{repo.path}")), Chat(repos: 10)), "T").Submenu!.Items.Count);
+
+    private static readonly GitSettings ProdGroup = new(
+        GitHostType.GitLab, "https://gitlab.example.com", "acme",
+        [ReviewTarget.Branch("develop"), new ReviewTarget("prod", ["master", "main"])]);
+
+    private static MenuPage Reviews(Func<RepoRef, string, bool> hasRemoteBranch, int repos = 2) =>
+        new MenuBuilder(Config() with { Git = ProdGroup }, Strings.En, hasRemoteBranch)
+            .ChatPage(Chat(repos: repos)).Items.Single(i => i.Label == "MR").Submenu!;
+
+    private static string Mrs(string target) =>
+        $"https://gitlab.example.com/groups/acme/-/merge_requests?scope=all&state=all&search=A-1&target_branch={target}";
+
+    [Fact]
+    public void Group_target_opens_only_branches_that_exist()
+    {
+        var reviews = Reviews((r, b) => b == "main");
+        Assert.Equal(["All MRs", "→ develop", "→ prod"], Labels(reviews));
+        Assert.Equal(new MenuAction.OpenUrl(Mrs("main")), reviews.Items[2].Action);
+    }
+
+    [Fact]
+    public void Group_target_opens_every_existing_branch_in_order()
+    {
+        var reviews = Reviews((r, b) => r.Name.StartsWith("repo0") ? b == "main" : b == "master");
+        Assert.Equal(new MenuAction.OpenUrls([Mrs("master"), Mrs("main")]), reviews.Items[2].Action, new ActionComparer());
+    }
+
+    [Fact]
+    public void Group_target_opens_all_branches_when_none_is_found()
+    {
+        Assert.Equal(new MenuAction.OpenUrls([Mrs("master"), Mrs("main")]), Reviews((r, b) => false).Items[2].Action, new ActionComparer());
+        Assert.Equal(new MenuAction.OpenUrls([Mrs("master"), Mrs("main")]), Reviews((r, b) => true, repos: 0).Items[2].Action, new ActionComparer());
+    }
+
+    [Fact]
+    public void One_branch_target_does_not_check_branches()
+    {
+        var git = ProdGroup with { Targets = [ReviewTarget.Branch("develop")] };
+        var reviews = new MenuBuilder(Config() with { Git = git }, Strings.En, (r, b) => throw new InvalidOperationException("must not be called"))
+            .ChatPage(Chat()).Items.Single(i => i.Label == "MR").Submenu!;
+        Assert.Equal(new MenuAction.OpenUrl(Mrs("develop")), reviews.Items[1].Action);
+    }
+
+    [Fact]
+    public void Reviews_submenu_fits_the_slots()
+    {
+        var git = ProdGroup with { Targets = [ReviewTarget.Branch("a"), ReviewTarget.Branch("b"), ReviewTarget.Branch("c")] };
+        var reviews = new MenuBuilder(Config() with { Git = git, SlotCount = 4 }, Strings.En)
+            .ChatPage(Chat()).Items.Single(i => i.Label == "MR").Submenu!;
+        Assert.Equal(["All MRs", "→ a", "→ b"], Labels(reviews));
+    }
+
+    private sealed class ActionComparer : IEqualityComparer<MenuAction?>
+    {
+        public bool Equals(MenuAction? x, MenuAction? y) => (x, y) switch
+        {
+            (MenuAction.OpenUrls a, MenuAction.OpenUrls b) => a.Urls.SequenceEqual(b.Urls),
+            _ => Object.Equals(x, y),
+        };
+
+        public int GetHashCode(MenuAction? obj) => 0;
+    }
 }

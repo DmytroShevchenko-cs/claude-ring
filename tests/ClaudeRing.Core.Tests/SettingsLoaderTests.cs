@@ -34,7 +34,7 @@ public class SettingsLoaderTests
         Assert.Equal(GitHostType.GitLab, s.Git.Host);
         Assert.Equal("https://gitlab.com", s.Git.BaseUrl);
         Assert.Null(s.Git.Group);
-        Assert.Equal(["main"], s.Git.Targets.ToArray());
+        Assert.Equal(["main"], s.Git.Targets.Select(t => t.Label).ToArray());
         Assert.Equal(new TrackerSettings(TrackerType.None), s.Tracker);
         Assert.Equal(new IdeSettings(IdeType.None), s.Ide);
         Assert.Equal(["chat", "ide", "reviews", "issue", "repos"], Ids(s));
@@ -89,7 +89,7 @@ public class SettingsLoaderTests
         Assert.Equal(GitHostType.GitHub, s.Git.Host);
         Assert.Equal("https://github.com", s.Git.BaseUrl);
         Assert.Equal("acme", s.Git.Group);
-        Assert.Equal(["develop", "main"], s.Git.Targets.ToArray());
+        Assert.Equal(["develop", "main"], s.Git.Targets.Select(t => t.Label).ToArray());
         Assert.Equal(new TrackerSettings(TrackerType.Linear, null, "acme"), s.Tracker);
         Assert.Equal(new IdeSettings(IdeType.Cursor), s.Ide);
         Assert.Equal(4, s.ChatMenu.Count);
@@ -152,7 +152,7 @@ public class SettingsLoaderTests
         Assert.Equal(GitHostType.GitLab, s.Git.Host);
         Assert.Equal("https://gitlab.example.com", s.Git.BaseUrl);
         Assert.Equal("acme", s.Git.Group);
-        Assert.Equal(["Dev", "RC"], s.Git.Targets.ToArray());
+        Assert.Equal(["Dev", "RC"], s.Git.Targets.Select(t => t.Label).ToArray());
         Assert.Equal(new TrackerSettings(TrackerType.Jira, "https://example.atlassian.net"), s.Tracker);
         Assert.Equal(new IdeSettings(IdeType.Rider), s.Ide);
         Assert.Equal(9, s.SlotCount);
@@ -192,9 +192,20 @@ public class SettingsLoaderTests
             """);
         Assert.Equal("https://new.example.com", s.Git.BaseUrl);
         Assert.Equal("old", s.Git.Group);
-        Assert.Equal(["new"], s.Git.Targets.ToArray());
+        Assert.Equal(["new"], s.Git.Targets.Select(t => t.Label).ToArray());
         Assert.Equal(new TrackerSettings(TrackerType.YouTrack, "https://yt.example.com"), s.Tracker);
         Assert.Equal(new IdeSettings(IdeType.Idea), s.Ide);
+    }
+
+    [Fact]
+    public void Target_can_group_several_branch_names()
+    {
+        var s = SettingsLoader.Parse("""
+            { "git": { "targets": [ "develop", { "label": "prod", "branches": ["master", "main"] } ] } }
+            """).Settings!;
+        Assert.Equal(["develop", "prod"], s.Git.Targets.Select(t => t.Label).ToArray());
+        Assert.Equal(["develop"], s.Git.Targets[0].Branches.ToArray());
+        Assert.Equal(["master", "main"], s.Git.Targets[1].Branches.ToArray());
     }
 
     [Theory]
@@ -210,6 +221,10 @@ public class SettingsLoaderTests
     [InlineData("""{ "repoRoots": "/work" }""", "repoRoots:")]
     [InlineData("""{ "git": { "baseUrl": "gitlab.example.com" } }""", "git.baseUrl:")]
     [InlineData("""{ "git": { "targets": ["main", 5] } }""", "git.targets[1]:")]
+    [InlineData("""{ "git": { "targets": [ { "branches": ["main"] } ] } }""", "git.targets[0].label:")]
+    [InlineData("""{ "git": { "targets": [ { "label": "prod", "branches": [] } ] } }""", "git.targets[0].branches:")]
+    [InlineData("""{ "git": { "targets": [ { "label": "prod" } ] } }""", "git.targets[0].branches:")]
+    [InlineData("""{ "git": { "targets": "main" } }""", "git.targets:")]
     [InlineData("""{ "git": "gitlab" }""", "git:")]
     [InlineData("""{ "chatMenu": "chat" }""", "chatMenu:")]
     [InlineData("""{ "mrTargets": [ { "label": "x" } ] }""", "mrTargets[0].branch:")]

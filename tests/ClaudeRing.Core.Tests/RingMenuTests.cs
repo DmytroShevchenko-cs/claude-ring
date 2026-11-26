@@ -22,7 +22,7 @@ public class RingMenuTests
     {
         Language = UiLanguage.Ru,
         SlotCount = n,
-        Git = new GitSettings(GitHostType.GitLab, "https://gitlab.example.com", "acme", ["Dev", "RC", "master"]),
+        Git = new GitSettings(GitHostType.GitLab, "https://gitlab.example.com", "acme", [ReviewTarget.Branch("Dev"), ReviewTarget.Branch("RC"), ReviewTarget.Branch("master")]),
         Tracker = jira ? new TrackerSettings(TrackerType.Jira, "https://j") : new TrackerSettings(TrackerType.None),
         Ide = Rider,
     };

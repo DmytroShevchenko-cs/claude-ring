@@ -162,11 +162,45 @@ public static class SettingsLoader
                 ?? (gitLab ? "https://gitlab.com" : "https://github.com");
             var group = Text(git, "group", "git.group")
                 ?? (gitLab ? Text(root, "gitLabGroup", "gitLabGroup") : null);
-            List<string> targets = TextList(git, "targets", "git.targets") ?? LegacyTargets(root) ?? ["main"];
+            List<ReviewTarget> targets = Targets(git) ?? LegacyTargets(root) ?? [ReviewTarget.Branch("main")];
             return new GitSettings(host, baseUrl, string.IsNullOrEmpty(group) ? null : group, targets);
         }
 
-        private List<string>? LegacyTargets(JsonElement root)
+        private List<ReviewTarget>? Targets(JsonElement? git)
+        {
+            if (Get(git, "targets") is not { } value) return null;
+            if (value.ValueKind != JsonValueKind.Array)
+            {
+                Errors.Add("git.targets: expected a list");
+                return null;
+            }
+            var result = new List<ReviewTarget>();
+            var i = 0;
+            foreach (var item in value.EnumerateArray())
+            {
+                var path = $"git.targets[{i++}]";
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } name)
+                {
+                    result.Add(ReviewTarget.Branch(name));
+                    continue;
+                }
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    Errors.Add($"{path}: expected a branch name or an object with label and branches");
+                    continue;
+                }
+                var label = Get(item, "label") is { ValueKind: JsonValueKind.String } l ? l.GetString() : null;
+                if (string.IsNullOrEmpty(label)) Errors.Add($"{path}.label: expected a non-empty string");
+                var errorsBefore = Errors.Count;
+                var branches = TextList(item, "branches", $"{path}.branches");
+                if (Errors.Count == errorsBefore && (branches == null || branches.Count == 0))
+                    Errors.Add($"{path}.branches: expected a non-empty list of branch names");
+                if (!string.IsNullOrEmpty(label) && branches is { Count: > 0 }) result.Add(new ReviewTarget(label, branches));
+            }
+            return result;
+        }
+
+        private List<ReviewTarget>? LegacyTargets(JsonElement root)
         {
             if (Get(root, "mrTargets") is not { } value) return null;
             if (value.ValueKind != JsonValueKind.Array)
@@ -174,11 +208,11 @@ public static class SettingsLoader
                 Errors.Add("mrTargets: expected a list");
                 return null;
             }
-            var result = new List<string>();
+            var result = new List<ReviewTarget>();
             var i = 0;
             foreach (var item in value.EnumerateArray())
             {
-                if (Get(item, "branch") is { ValueKind: JsonValueKind.String } b && b.GetString() is { Length: > 0 } branch) result.Add(branch);
+                if (Get(item, "branch") is { ValueKind: JsonValueKind.String } b && b.GetString() is { Length: > 0 } branch) result.Add(ReviewTarget.Branch(branch));
                 else Errors.Add($"mrTargets[{i}].branch: expected a non-empty string");
                 i++;
             }

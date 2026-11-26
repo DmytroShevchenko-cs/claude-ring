@@ -8,8 +8,14 @@ public enum TrackerType { None, Jira, Linear, YouTrack, GitHub }
 
 public enum IdeType { None, Rider, Idea, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, VsCode, Cursor, Windsurf, Custom }
 
+// One item of the reviews submenu. Several branch names cover repos that name the same branch differently (master / main).
+public sealed record ReviewTarget(string Label, IReadOnlyList<string> Branches)
+{
+    public static ReviewTarget Branch(string name) => new(name, [name]);
+}
+
 // BaseUrl has no trailing "/".
-public sealed record GitSettings(GitHostType Host, string BaseUrl, string? Group, IReadOnlyList<string> Targets);
+public sealed record GitSettings(GitHostType Host, string BaseUrl, string? Group, IReadOnlyList<ReviewTarget> Targets);
 
 public sealed record TrackerSettings(TrackerType Type, string? BaseUrl = null, string? Workspace = null);
 
@@ -42,7 +48,7 @@ public sealed record Settings
 
     public string TaskKeyPattern { get; init; } = DefaultTaskKeyPattern;
 
-    public GitSettings Git { get; init; } = new(GitHostType.GitLab, "https://gitlab.com", null, ["main"]);
+    public GitSettings Git { get; init; } = new(GitHostType.GitLab, "https://gitlab.com", null, [ReviewTarget.Branch("main")]);
 
     public TrackerSettings Tracker { get; init; } = new(TrackerType.None);
 
